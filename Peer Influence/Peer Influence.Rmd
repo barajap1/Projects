@@ -1,0 +1,246 @@
+---
+title: "Peer Influence for a music-streaming company"
+author: "Pablo"
+date: "4/16/2019"
+output:
+    prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align="center")
+```
+
+## Peer Influence for a music-streaming company
+
+```{r warning = FALSE, error = FALSE, message = FALSE}
+# Load relevant packages
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(MatchIt)
+library(psych)
+library(GGally)
+library(gridExtra)
+```
+
+```{r}
+#read the dataset
+High_Note <- read.csv("Data.csv", header = TRUE)
+```
+
+```{r}
+describeBy(High_Note, group = High_Note$adopter, mat = FALSE, digits=2)
+```
+
+```{r}
+#Take log of variables where values are too large compared to the others
+High_Note <- High_Note %>% mutate(ln_songsListened = log(songsListened + 1))
+High_Note <- High_Note %>% mutate(ln_lovedTracks = log(lovedTracks + 1))
+```
+```{r fig1, fig.height = 10, fig.width = 10, fig.align ="center"}
+#Start with some visualizations
+ggcorr(High_Note, palette = "RdBu", label = TRUE)
+pairs(~age+friend_cnt+ln_songsListened+posts, col=High_Note$adopter, data=High_Note, main="Scatterplot Matrix")
+```
+
+```{r fig2, fig.height = 7, fig.width = 7, fig.align ="center"}
+#Demographics
+Age_plot <- ggplot(High_Note, aes(x = factor(adopter), y = age)) + geom_boxplot(aes(fill = factor(adopter))) + labs(x = "Adopter")
+Age_plot
+
+Age_plotbygender <- ggplot(High_Note, aes(x=factor(adopter), y=age, color = factor(male))) + geom_boxplot() + labs(x = "Adopter")
+Age_plotbygender
+```
+
+```{r fig3, fig.height = 7, fig.width = 7}
+#Peer influence
+friend_cnt_plot <- ggplot(High_Note, aes(x = factor(adopter), y = friend_cnt)) + geom_boxplot(aes(fill = factor(adopter))) +ylim(0, 1250) +
+  labs(x = "Adopter")
+friend_cnt_plot
+
+subscriber_friend_cnt_plot <- ggplot(High_Note, aes(x = factor(adopter), y = subscriber_friend_cnt)) + 
+  geom_boxplot(aes(fill = factor(adopter))) + ylim(0, 50)  + labs(x = "Adopter")
+subscriber_friend_cnt_plot
+```
+
+```{r fig4, fig.height = 7, fig.width = 7, fig.align ='center'}
+#user engagement 
+ln_songsListened_plot <- ggplot(High_Note, aes(x = factor(adopter), y = ln_songsListened)) + geom_boxplot(aes(fill = factor(adopter)))
+ln_songsListened_plot
+
+ln_lovedTracks_plot <- ggplot(High_Note, aes(x = factor(adopter), y = ln_lovedTracks)) + geom_boxplot(aes(fill = factor(adopter)))
+ln_lovedTracks_plot
+```
+##Propensity Score Matching
+```{r}
+#Transform subscriber friend count into the Treatment and control variable with Treatment being 1 and Control being 0
+High_Note$Treatment <- ifelse(High_Note$subscriber_friend_cnt >= 1, 1, 0)
+```
+```{r}
+#For those who have 1 or more subscriber friends, on average 18% of them are premuim subsribers, 
+# while those who have 0 subscriber friends, on average 5%  of them are premium subscribers. 
+
+High_Note %>%
+  group_by(Treatment) %>%
+  summarise(mean_adopter = mean(adopter))
+
+with(High_Note, t.test(adopter ~ Treatment))
+```
+# Difference-in-means: pre-treatment covariates
+# Let's calculate the mean for each covariate
+
+```{r}
+High_Note_cov <- c("age","male","friend_cnt","avg_friend_age","avg_friend_male","friend_country_cnt","ln_songsListened", 
+              "ln_lovedTracks","posts","playlists","shouts", "tenure","good_country")
+High_Note %>%
+  group_by(Treatment) %>%
+  select(one_of(High_Note_cov)) %>%
+  summarise_all(funs(mean(., na.rm = T)))
+```
+
+```{r}
+#T-test
+list_of_var <- c("age","male","friend_cnt","avg_friend_age","avg_friend_male","friend_country_cnt","ln_songsListened", 
+              "ln_lovedTracks","posts","playlists","shouts", "tenure","good_country")
+lapply(list_of_var, function(v) {
+  t.test(High_Note[, v] ~ High_Note$Treatment)
+})
+```
+
+Propensity score estimation
+We estimate the propensity score by running a logit model (probit also works) 
+where the outcome variable is a binary variable indicating treatment status. 
+what covariates should we include? For the matching to give you a causal estimate 
+in the end, you need to include any covariate that is related to both the treatment 
+assignment and potential outcomes. Therefore at this moment I choose to include all variables
+
+```{r}
+m_ps <- glm(Treatment ~ age + male + friend_cnt + avg_friend_age + avg_friend_male + friend_country_cnt +  
+               ln_songsListened + ln_lovedTracks + posts + playlists + shouts + tenure + good_country,
+             family = binomial(), data = High_Note)
+summary(m_ps)
+```
+
+Using this model, we can now calculate the propensity score for each user 
+It is simply the user's predicted probability of being Treated, 
+given the estimates from the logit model.
+
+```{r}
+prs_df <- data.frame(pr_score = predict(m_ps, type = "response"),
+                     Treatment = m_ps$model$Treatment)
+head(prs_df)
+```
+
+Examining the region of common support
+After estimating the propensity score, it is useful to plot histograms of the estimated propensity scores by treatment status
+
+```{r}
+labs <- paste("Treatment type:", c("1 or more friends", "0 friends"))
+prs_df %>%
+  mutate(SubscriberType = ifelse(Treatment == 1, labs[1], labs[2])) %>%
+  ggplot(aes(x = pr_score)) +
+  geom_histogram(color = "white", binwidth = 0.025) +
+  facet_wrap(~SubscriberType) +
+  xlab("Probability of Treatment") +
+  theme_bw()
+```
+
+The method we use below is to find pairs of observations that have very similar propensity scores, 
+but that differ in their treatment status. We use the package MatchIt for this. 
+This package estimates the propensity score in the background and then matches observations based 
+on the method of choice ("nearest" in this case)
+
+```{r}
+High_Note_nomiss <- High_Note %>%  # MatchIt does not allow missing values
+  select(adopter, Treatment, one_of(High_Note_cov)) %>%
+  na.omit()
+
+mod_match <- matchit(Treatment ~ age + male + friend_cnt + avg_friend_age + avg_friend_male + friend_country_cnt +  
+                       ln_songsListened + ln_lovedTracks + posts + playlists + shouts + tenure + good_country,
+                     method = "nearest", data = High_Note_nomiss)
+```
+
+We can get some information about how successful the matching was using summary(mod_match) and plot(mod_match)
+
+```{r}
+summary(mod_match)
+plot(mod_match)
+```
+
+To create a dataframe containing only the matched observations, use the match.data() function
+```{r}
+dta_m <- match.data(mod_match)
+dim(dta_m)
+```
+
+Examining covariate balance in the matched sample
+Visual Inspection
+```{r}
+fn_bal <- function(dta, variable) {
+  dta$variable <- dta[, variable]
+  dta$Treatment <- as.factor(dta$Treatment)
+  support <- c(min(dta$variable), max(dta$variable))
+  ggplot(dta, aes(x = distance, y = variable, color = Treatment)) +
+    geom_point(alpha = 0.2, size = 1.3) +
+    geom_smooth(method = "loess", se = F) +
+    xlab("Propensity score") +
+    ylab(variable) +
+    theme_bw() +
+    ylim(support)
+}
+
+grid.arrange(
+  fn_bal(dta_m, "age"),
+  fn_bal(dta_m, "male") + theme(legend.position = "none"),
+  fn_bal(dta_m, "friend_cnt"),
+  fn_bal(dta_m, "avg_friend_age") + theme(legend.position = "none"),
+  fn_bal(dta_m, "friend_country_cnt"),
+  fn_bal(dta_m, "ln_songsListened") + theme(legend.position = "none"),
+  fn_bal(dta_m, "ln_lovedTracks"),
+  fn_bal(dta_m, "playlists") + theme(legend.position = "none"),
+  fn_bal(dta_m, "tenure"),
+  fn_bal(dta_m, "good_country") + theme(legend.position = "none"),
+  nrow = 6, widths = c(1, 0.8)
+)
+```
+Difference of Means
+```{r}
+dta_m %>%
+  group_by(Treatment) %>%
+  select(one_of(High_Note_cov)) %>%
+  summarise_all(funs(mean))
+
+lapply(High_Note_cov, function(v) {
+  t.test(dta_m[, v] ~ dta_m$Treatment)
+})
+```
+Estimating treatment effects
+
+Estimating the treatment effect is simple once we have 
+a matched sample that we are happy with. We can use a t-test:
+```{r}
+with(dta_m, t.test(adopter ~ Treatment))
+```
+
+Or we can use OLS with or without covariates:
+```{r}
+glm_treat1 <- glm(adopter ~ Treatment, data = dta_m, family = "binomial")
+summary(glm_treat1)
+
+glm_treat2 <- glm(adopter ~ age + male + friend_cnt + avg_friend_age + avg_friend_male + friend_country_cnt +  
+                    ln_songsListened + ln_lovedTracks + posts + playlists + shouts + tenure + good_country + Treatment, 
+                  data = dta_m, family = "binomial")
+summary(glm_treat2)
+```
+
+In a logistic regression the response being modeled is the log(odds) that Y = 1
+The regression coefficient gives the change in log(odds) in the response for a unit change in the predictor variable
+because log(odds) are difficult to interpret, we can exponentiate them
+
+We can see that the odds of being a premium subscriber are increased by a factor of 1.499 when and individual is male
+```{r}
+exp(coef(glm_treat2))
+```
+
