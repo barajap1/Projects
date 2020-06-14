@@ -7,7 +7,7 @@ library(data.table)
 library(ggimage)
 test <- fread("test.csv")
 
-register_google(key="AIzaSyCpTFuK3V56DMLmYLECMP79SZKTiJdheDA")
+register_google(key="GoogleAPIKEy")
 torrance <- c(lon = -118.3406, lat = 33.8358)
 torrance_map <- get_map(location = torrance, zoom = 10, maptype = "terrain", source = "google")
 torrance_map <- get_map(location = torrance, zoom = 12, maptype = "watercolor", source = "stamen")
