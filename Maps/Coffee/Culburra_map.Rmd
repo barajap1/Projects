@@ -1,0 +1,91 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+--
+title: "Culburra Map"
+author: "Dean Marchiori"
+date: "04/02/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup  
+
+```{r}
+library(osmdata)
+library(dodgr)
+library(tidyverse)
+library(sf)
+
+-118.449955,33.729337,-118.123283,33.864572
+```
+
+# Bounding Box  
+
+```{r}
+bbox <- sf::st_bbox(c(xmin = 150.739, 
+                  xmax = 150.8, 
+                  ymax = -34.903,
+                  ymin = -34.94), 
+                crs = st_crs(4326)) %>% 
+  sf::st_as_sfc()
+```
+
+# Get streets
+
+```{r}
+estimate_box <- osmdata::getbb("culburra beach, NSW, Australia")
+streets_raw <- dodgr_streetnet(estimate_box, expand = 1)
+```
+
+# Clean streets  
+
+```{r}
+streets <- streets_raw %>% 
+  st_intersection(bbox) %>% 
+  select(osm_id, name, highway) %>% 
+#  filter(!osm_id %in% c(43928836, 394813974, 43928837, 404519947, 225636408, 225636411, 225636412, 225636406, 331330145, 4996645, 9642735 )) %>% 
+  mutate(highway = fct_recode(highway, 
+                              residential = "service",
+                              residential = "unclassified",
+                              path = "track",
+                              path = "cycleway",
+                              path = "footway"
+                              )) 
+```
+
+# Make map
+
+```{r}
+ggplot(streets, aes(col = highway)) +
+  geom_sf(data = filter(streets, highway == 'path'), alpha = 0.4, show.legend = F) +
+  geom_sf(data = filter(streets, highway == 'residential'), alpha = 0.5, show.legend = F) +
+  geom_sf(data = filter(streets, highway == 'secondary'), alpha = 0.9, show.legend = F) +
+  scale_colour_manual(values =  c("path" = "#70838B", 
+                                  "residential" = "#0A5D81", 
+                                  "secondary" = "#0A5D81")) +
+  labs(caption = "Culburra Beach",
+       y = "") +
+  expand_limits(y = c(-34.8980, -34.9482)) + 
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "#E4D9C6", color = NA),
+    panel.background = element_rect(fill = "#E4D9C6",  color = NA),
+    panel.grid = element_blank(), 
+    axis.text = element_text(colour = "#C7B18A", family = "Ubuntu Mono"),
+    axis.ticks = element_blank(), 
+    panel.border = element_blank(), 
+    plot.caption = element_text(family = "Ubuntu Mono", size = 85, vjust = -0.2, color = '#C7B18A'), 
+    plot.margin = margin(22,10,22,10, "mm"))
+ggsave('culburra.png', width = 297, height = 420, units = "mm", dpi = "retina")
+```
+
+
+
