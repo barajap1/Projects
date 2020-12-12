@@ -1,0 +1,59 @@
+---
+title: "The Strangest Indicator Of 2020"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+Visualizing ***"The Indicator"*** podcast
+
+
+So far this year, real disposable income per capita in the U.S. has gone up by about 6 percent year-to-date from last year. Right now, it's on track to reach the fastest rate of growth since 1984.
+
+This raises one big question: How? The United States has experienced an economic shock that's left millions of people out of work — and on top of that, the economic recovery seems to be slowing. How could disposable income have possibly risen at such a rapid pace?
+
+Cardiff and Stacey break down the strangest economic indicator of the year.
+
+Listen to the episode **[here](https://www.npr.org/2020/12/08/944375878/the-strangest-indicator-of-2020)**
+
+What is Personal Income?
+Income that people get from wages and salaries, Social Security and other government benefits, dividends and interest, business ownership, and other sources. These statistics can offer clues to Americans' financial health and future consumer spending.s
+
+Source:
+***U.S. Bureau of Economic Analysis, Real Disposable Personal Income: Per Capita [A229RX0], retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/A229RX0, December 11, 2020.***
+
+
+```{r}
+pacman::p_load(tidyverse, lubridate)
+```
+
+
+```{r}
+RDPI <- read.csv("Data/A229RX0.csv")
+
+```
+
+```{r}
+RDPI$DATE <- lubridate::as_date(RDPI$DATE)
+
+RDPI <- RDPI %>% rename(income = A229RX0)
+
+```
+
+```{r}
+g <- RDPI %>% filter(DATE >= "1999-01-01") %>% 
+  ggplot(aes(x = DATE, y = income)) + 
+  geom_line() +
+  scale_y_continuous(labels=scales::dollar_format()) +
+  theme_minimal() +
+  labs(title = "Real Disposable Income: Per Capita",
+       subtitle = "Source: U.S. Bureau of Economic Analysis",
+       y = "RDPI",
+       X = "Year-Month")
+```
+```{r}
+plotly::ggplotly(g)
+```
+
